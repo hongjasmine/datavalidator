@@ -79,8 +79,8 @@ fA = st.sidebar.file_uploader("File A (.xlsx/.xls)", type=["xlsx","xls"])
 fB = st.sidebar.file_uploader("File B (.xlsx/.xls)", type=["xlsx","xls"])
 
 st.sidebar.header("Options")
-normalize = st.sidebar.checkbox("Normalize headers (recommended)", value=True)
-keys_raw = st.sidebar.text_input("Key columns (comma-separated)", value="")
+normalize = st.sidebar.checkbox("Normalize headers", value=True)
+keys_raw = st.sidebar.text_input("Key columns", value="")
 out_fmt = st.sidebar.radio("Download format", ["CSV", "JSON"], index=0)
 
 # ---------- main ----------
