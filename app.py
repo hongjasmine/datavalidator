@@ -3,8 +3,8 @@ import json
 import pandas as pd
 import streamlit as st
 
-st.set_page_config(page_title="Excel & DB Data Validation", layout="wide")
-st.title("Data Validator")
+st.set_page_config(page_title="Excel / CSV / JSON Validator", layout="wide")
+st.title("Excel / CSV / JSON Data Validator")
 
 # ---------- helpers ----------
 def normalize_headers(df: pd.DataFrame) -> pd.DataFrame:
@@ -14,6 +14,23 @@ def normalize_headers(df: pd.DataFrame) -> pd.DataFrame:
                   .str.replace(r"\s+", "_", regex=True)
                   .str.replace(r"[^\w\-]", "", regex=True))
     return df
+
+def load_file(uploaded_file, csv_sep=",", json_lines=False):
+    name = uploaded_file.name.lower()
+    if name.endswith(".csv"):
+        return pd.read_csv(uploaded_file, sep=csv_sep)
+    elif name.endswith((".xlsx", ".xls")):
+        return pd.read_excel(uploaded_file)
+    elif name.endswith(".json"):
+        # Try user choice first; then fall back to the other mode
+        try:
+            return pd.read_json(uploaded_file, lines=json_lines)
+        except Exception:
+            uploaded_file.seek(0)
+            return pd.read_json(uploaded_file, lines=not json_lines)
+    else:
+        st.error(f"Unsupported file type: {name}. Please upload CSV, Excel, or JSON.")
+        return None
 
 def schema_compare(a: pd.DataFrame, b: pd.DataFrame) -> pd.DataFrame:
     cols = sorted(set(a.columns).union(b.columns))
@@ -65,7 +82,8 @@ def row_diffs(a: pd.DataFrame, b: pd.DataFrame, keys):
     diffs = []
     for idx in shared:
         ra, rb = a_idx.loc[idx], b_idx.loc[idx]
-        changed = [c for c in common if not (pd.isna(ra[c]) and pd.isna(rb[c])) and str(ra[c]) != str(rb[c])]
+        changed = [c for c in common
+                   if not (pd.isna(ra[c]) and pd.isna(rb[c])) and str(ra[c]) != str(rb[c])]
         if changed:
             rec = {k:v for k,v in zip(keys, idx if isinstance(idx, tuple) else (idx,))}
             rec["changed_columns"] = ", ".join(changed)
@@ -75,23 +93,35 @@ def row_diffs(a: pd.DataFrame, b: pd.DataFrame, keys):
 
 # ---------- sidebar ----------
 st.sidebar.header("Upload")
-fA = st.sidebar.file_uploader("File A (.xlsx/.xls)", type=["xlsx","xls"])
-fB = st.sidebar.file_uploader("File B (.xlsx/.xls)", type=["xlsx","xls"])
+fA = st.sidebar.file_uploader("File A", type=["csv","xlsx","xls","json"])
+fB = st.sidebar.file_uploader("File B", type=["csv","xlsx","xls","json"])
 
 st.sidebar.header("Options")
 normalize = st.sidebar.checkbox("Normalize headers", value=True)
-keys_raw = st.sidebar.text_input("Key columns", value="")
+
+st.sidebar.markdown("**CSV options**")
+csv_sep = st.sidebar.selectbox("Delimiter", [",",";","\\t","|"], index=0)
+csv_sep_value = {"\\t":"\t"}.get(csv_sep, csv_sep)
+
+st.sidebar.markdown("**JSON options**")
+json_lines = st.sidebar.checkbox("JSON Lines (one JSON object per line)", value=False)
+
+keys_raw = st.sidebar.text_input("Key columns (comma-separated)", value="")
 out_fmt = st.sidebar.radio("Download format", ["CSV", "JSON"], index=0)
 
 # ---------- main ----------
 if fA and fB:
-    dfA = pd.read_excel(fA)
-    dfB = pd.read_excel(fB)
+    dfA = load_file(fA, csv_sep=csv_sep_value, json_lines=json_lines)
+    dfB = load_file(fB, csv_sep=csv_sep_value, json_lines=json_lines)
+    if dfA is None or dfB is None:
+        st.stop()
+
     if normalize:
         dfA = normalize_headers(dfA)
         dfB = normalize_headers(dfB)
 
     key_cols = [k.strip() for k in keys_raw.split(",") if k.strip()]
+
     st.markdown("### Schema Comparison")
     sch = schema_compare(dfA, dfB)
     st.dataframe(sch, use_container_width=True, height=240)
@@ -102,15 +132,15 @@ if fA and fB:
     qual = qa.merge(qb, on="column", how="outer")
     st.dataframe(qual, use_container_width=True, height=280)
 
-    st.markdown("### Key Integrity & Duplicates")
-    stats = key_join_stats(dfA, dfB, key_cols)
-    c1, c2, c3 = st.columns(3)
-    c1.metric("Matched keys", stats["matched"])
-    c2.metric("Only in A", stats["only_in_A"])
-    c3.metric("Only in B", stats["only_in_B"])
-    dupA = find_duplicates(dfA, key_cols); dupB = find_duplicates(dfB, key_cols)
-    if not dupA.empty: st.caption("Duplicate keys in A"); st.dataframe(dupA, use_container_width=True)
-    if not dupB.empty: st.caption("Duplicate keys in B"); st.dataframe(dupB, use_container_width=True)
+    # st.markdown("### Key Integrity & Duplicates")
+    # stats = key_join_stats(dfA, dfB, key_cols)
+    # c1, c2, c3 = st.columns(3)
+    # c1.metric("Matched keys", stats["matched"])
+    # c2.metric("Only in A", stats["only_in_A"])
+    # c3.metric("Only in B", stats["only_in_B"])
+    # dupA = find_duplicates(dfA, key_cols); dupB = find_duplicates(dfB, key_cols)
+    # if not dupA.empty: st.caption("Duplicate keys in A"); st.dataframe(dupA, use_container_width=True)
+    # if not dupB.empty: st.caption("Duplicate keys in B"); st.dataframe(dupB, use_container_width=True)
 
     st.markdown("### Row Differences (by key)")
     diffs = row_diffs(dfA, dfB, key_cols)
@@ -122,9 +152,9 @@ if fA and fB:
     st.markdown("---")
     st.subheader("Download")
     if out_fmt == "CSV":
-        st.download_button("⬇️ schema.csv", sch.to_csv(index=False), "schema.csv", "text/csv")
-        st.download_button("⬇️ quality.csv", qual.to_csv(index=False), "quality.csv", "text/csv")
-        st.download_button("⬇️ diffs.csv", diffs.to_csv(index=False), "diffs.csv", "text/csv")
+        st.download_button("*schema.csv", sch.to_csv(index=False), "schema.csv", "text/csv")
+        st.download_button("*quality.csv", qual.to_csv(index=False), "quality.csv", "text/csv")
+        st.download_button("*diffs.csv", diffs.to_csv(index=False), "diffs.csv", "text/csv")
     else:
         bundle = {
             "schema": json.loads(sch.to_json(orient="records")),
@@ -132,6 +162,6 @@ if fA and fB:
             "diffs": json.loads(diffs.to_json(orient="records")),
         }
         report = json.dumps(bundle, indent=2, default=str).encode("utf-8")
-        st.download_button("⬇️ validation_report.json", report, "validation_report.json", "application/json")
+        st.download_button("*validation_report.json", report, "validation_report.json", "application/json")
 else:
-    st.info("Upload two Excel files in the sidebar to begin.")
+    st.info("Upload two files (CSV/XLSX/XLS/JSON) in the sidebar to begin.")
