@@ -1,3 +1,4 @@
+# app.py
 import json
 import pandas as pd
 import streamlit as st
@@ -171,109 +172,113 @@ if page == "Home":
 
         key_cols = [k.strip() for k in keys_raw.split(",") if k.strip()]
 
-        st.markdown("### Schema Comparison")
-        sch = schema_compare(dfA, dfB)
-        st.dataframe(sch, use_container_width=True, height=240)
-
-        st.markdown("### Column Quality")
-        qa = column_quality(dfA).rename(columns=lambda c: f"A_{c}" if c!="column" else c)
-        qb = column_quality(dfB).rename(columns=lambda c: f"B_{c}" if c!="column" else c)
-        qual = qa.merge(qb, on="column", how="outer")
-
-        # Highlight mismatches between A and B columns
-        def highlight_quality(row):
-            highlights = [''] * len(row)
-            colnames = list(row.index)
-            for i, col in enumerate(colnames):
-                if col.startswith('A_'):
-                    b_col = 'B_' + col[2:]
-                    if b_col in row and pd.notnull(row[col]) and pd.notnull(row[b_col]) and row[col] != row[b_col]:
-                        highlights[i] = 'background-color: #ffe082'
-                elif col.startswith('B_'):
-                    a_col = 'A_' + col[2:]
-                    if a_col in row and pd.notnull(row[col]) and pd.notnull(row[a_col]) and row[col] != row[a_col]:
-                        highlights[i] = 'background-color: #ffe082'
-            return highlights
-
-        styled_qual = qual.style.apply(highlight_quality, axis=1)
-        st.write(styled_qual)
-
-        # st.markdown("### Key Integrity & Duplicates")
-        # stats = key_join_stats(dfA, dfB, key_cols)
-        # c1, c2, c3 = st.columns(3)
-        # c1.metric("Matched keys", stats["matched"])
-        # c2.metric("Only in A", stats["only_in_A"])
-        # c3.metric("Only in B", stats["only_in_B"])
-        # dupA = find_duplicates(dfA, key_cols); dupB = find_duplicates(dfB, key_cols)
-        # if not dupA.empty: st.caption("Duplicate keys in A"); st.dataframe(dupA, use_container_width=True)
-        # if not dupB.empty: st.caption("Duplicate keys in B"); st.dataframe(dupB, use_container_width=True)
 
 
-        st.markdown("### Row Differences (by key)")
+        # --- Calculate diffs and duplicates before tabs ---
         diffs = row_diffs(dfA, dfB, key_cols)
-        if diffs.empty:
-            st.info("No diffs for matched keys (or keys missing).")
-        else:
-            # Highlight changed columns in the diffs table
-            def highlight_changes(col):
-                return [
-                    'background-color: #ffe082' if v and isinstance(v, str) and (v.startswith('{') or v.startswith('[')) else ''
-                    for v in col
-                ]
+        dupsA = find_duplicates(dfA, key_cols)
+        dupsB = find_duplicates(dfB, key_cols)
 
-            styled_diffs = diffs.style.apply(highlight_changes, subset=['changes'], axis=0)
-            st.write(styled_diffs)
+        # --- Interactive Filtering and Downloadable Filtered Data ---
+        st.markdown("### Data Exploration & Filtering")
+        tabs = st.tabs(["File A", "File B", "Mismatches", "Duplicates"])
 
-        st.markdown("---")
-        st.subheader("Download")
+        # File A tab
+        with tabs[0]:
+            st.write("#### File A: All Data")
+            st.dataframe(dfA, use_container_width=True)
+            st.write("#### Rows with Nulls")
+            nullsA = dfA[dfA.isnull().any(axis=1)]
+            st.dataframe(nullsA, use_container_width=True)
+            st.download_button("Download rows with nulls (A)", nullsA.to_csv(index=False), "nulls_A.csv", "text/csv")
 
-        # --- Summary generation ---
-        summary = {
-            "schema": {
-                "columns_in_A": len(dfA.columns),
-                "columns_in_B": len(dfB.columns),
-                "rows_in_A": len(dfA),
-                "rows_in_B": len(dfB),
-            },
-            "quality": {
-                "total_columns": len(qual),
-                "total_rows_A": len(dfA),
-                "total_rows_B": len(dfB),
-            },
-            "diffs": {
-                "total_diffs": len(diffs),
+        # File B tab
+        with tabs[1]:
+            st.write("#### File B: All Data")
+            st.dataframe(dfB, use_container_width=True)
+            st.write("#### Rows with Nulls")
+            nullsB = dfB[dfB.isnull().any(axis=1)]
+            st.dataframe(nullsB, use_container_width=True)
+            st.download_button("Download rows with nulls (B)", nullsB.to_csv(index=False), "nulls_B.csv", "text/csv")
+
+        # Mismatches tab
+        with tabs[2]:
+            st.write("#### Mismatched Rows (by key)")
+            if diffs.empty:
+                st.info("No diffs for matched keys (or keys missing).")
+            else:
+                st.dataframe(diffs, use_container_width=True)
+                st.download_button("Download mismatched rows", diffs.to_csv(index=False), "mismatches.csv", "text/csv")
+
+            # --- Schema Comparison and Column Quality only in this tab ---
+            st.write("#### Schema Comparison")
+            sch = schema_compare(dfA, dfB)
+            st.dataframe(sch, use_container_width=True, height=240)
+
+            st.write("#### Column Quality")
+            qa = column_quality(dfA).rename(columns=lambda c: f"A_{c}" if c!="column" else c)
+            qb = column_quality(dfB).rename(columns=lambda c: f"B_{c}" if c!="column" else c)
+            qual = qa.merge(qb, on="column", how="outer")
+
+            def highlight_quality(row):
+                highlights = [''] * len(row)
+                colnames = list(row.index)
+                for i, col in enumerate(colnames):
+                    if col.startswith('A_'):
+                        b_col = 'B_' + col[2:]
+                        if b_col in row and pd.notnull(row[col]) and pd.notnull(row[b_col]) and row[col] != row[b_col]:
+                            highlights[i] = 'background-color: #ffe082'
+                    elif col.startswith('B_'):
+                        a_col = 'A_' + col[2:]
+                        if a_col in row and pd.notnull(row[col]) and pd.notnull(row[a_col]) and row[col] != row[a_col]:
+                            highlights[i] = 'background-color: #ffe082'
+                return highlights
+
+            styled_qual = qual.style.apply(highlight_quality, axis=1)
+            st.write(styled_qual)
+
+            # --- Summary generation and downloads ---
+            summary = {
+                "schema": {
+                    "columns_in_A": len(dfA.columns),
+                    "columns_in_B": len(dfB.columns),
+                    "rows_in_A": len(dfA),
+                    "rows_in_B": len(dfB),
+                },
+                "quality": {
+                    "total_columns": len(qual),
+                    "total_rows_A": len(dfA),
+                    "total_rows_B": len(dfB),
+                },
+                "diffs": {
+                    "total_diffs": len(diffs),
+                }
             }
-        }
 
-        # --- CSV with summary row ---
-        def add_summary_row(df, summary_dict):
-            summary_row = {col: summary_dict.get(col, "") for col in df.columns}
-            return pd.concat([
-                pd.DataFrame([summary_row]),
-                df
-            ], ignore_index=True)
+            def add_summary_row(df, summary_dict):
+                summary_row = {col: summary_dict.get(col, "") for col in df.columns}
+                return pd.concat([
+                    pd.DataFrame([summary_row]),
+                    df
+                ], ignore_index=True)
 
-        # Schema CSV summary
-        sch_csv = add_summary_row(sch, {
-            "column": "SUMMARY",
-            "in_A": summary["schema"]["columns_in_A"],
-            "in_B": summary["schema"]["columns_in_B"],
-            "dtype_A": f'Rows: {summary["schema"]["rows_in_A"]}',
-            "dtype_B": f'Rows: {summary["schema"]["rows_in_B"]}',
-        })
-        qual_csv = add_summary_row(qual, {
-            "column": "SUMMARY",
-            "A_dtype": f'Rows: {summary["quality"]["total_rows_A"]}',
-            "B_dtype": f'Rows: {summary["quality"]["total_rows_B"]}',
-        }) if not qual.empty else qual
-        diffs_csv = add_summary_row(diffs, {
-            "changed_columns": "SUMMARY",
-            "changes": f'Total diffs: {summary["diffs"]["total_diffs"]}',
-        }) if not diffs.empty else diffs
+            sch_csv = add_summary_row(sch, {
+                "column": "SUMMARY",
+                "in_A": summary["schema"]["columns_in_A"],
+                "in_B": summary["schema"]["columns_in_B"],
+                "dtype_A": f'Rows: {summary["schema"]["rows_in_A"]}',
+                "dtype_B": f'Rows: {summary["schema"]["rows_in_B"]}',
+            })
+            qual_csv = add_summary_row(qual, {
+                "column": "SUMMARY",
+                "A_dtype": f'Rows: {summary["quality"]["total_rows_A"]}',
+                "B_dtype": f'Rows: {summary["quality"]["total_rows_B"]}',
+            }) if not qual.empty else qual
+            diffs_csv = add_summary_row(diffs, {
+                "changed_columns": "SUMMARY",
+                "changes": f'Total diffs: {summary["diffs"]["total_diffs"]}',
+            }) if not diffs.empty else diffs
 
-
-        # Only generate and show summary if both dataframes are loaded
-        if dfA is not None and dfB is not None:
             # --- Text summary for mismatches and nulls ---
             def make_text_summary(dfA, dfB, diffs, key_cols):
                 lines = []
@@ -321,19 +326,47 @@ if page == "Home":
             text_summary = make_text_summary(dfA, dfB, diffs, key_cols)
             st.download_button("*summary.txt", text_summary, "summary.txt", "text/plain")
 
-        if out_fmt == "CSV":
-            st.download_button("*schema.csv", sch_csv.to_csv(index=False), "schema.csv", "text/csv")
-            st.download_button("*quality.csv", qual_csv.to_csv(index=False), "quality.csv", "text/csv")
-            st.download_button("*diffs.csv", diffs_csv.to_csv(index=False), "diffs.csv", "text/csv")
-        else:
-            bundle = {
-                "summary": summary,
-                "schema": json.loads(sch.to_json(orient="records")),
-                "quality": json.loads(qual.to_json(orient="records")),
-                "diffs": json.loads(diffs.to_json(orient="records")),
-            }
-            report = json.dumps(bundle, indent=2, default=str).encode("utf-8")
-            st.download_button("*validation_report.json", report, "validation_report.json", "application/json")
-    else:
-        st.info("Upload two files (CSV/XLSX/XLS/JSON) in the sidebar to begin.")
+            if out_fmt == "CSV":
+                st.download_button("*schema.csv", sch_csv.to_csv(index=False), "schema.csv", "text/csv")
+                st.download_button("*quality.csv", qual_csv.to_csv(index=False), "quality.csv", "text/csv")
+                st.download_button("*diffs.csv", diffs_csv.to_csv(index=False), "diffs.csv", "text/csv")
+            else:
+                bundle = {
+                    "summary": summary,
+                    "schema": json.loads(sch.to_json(orient="records")),
+                    "quality": json.loads(qual.to_json(orient="records")),
+                    "diffs": json.loads(diffs.to_json(orient="records")),
+                }
+                report = json.dumps(bundle, indent=2, default=str).encode("utf-8")
+                st.download_button("*validation_report.json", report, "validation_report.json", "application/json")
+
+        # Duplicates tab
+        with tabs[3]:
+            st.write("#### Duplicates in File A")
+            st.dataframe(dupsA, use_container_width=True)
+            st.download_button("Download duplicates (A)", dupsA.to_csv(index=False), "dups_A.csv", "text/csv")
+            st.write("#### Duplicates in File B")
+            st.dataframe(dupsB, use_container_width=True)
+            st.download_button("Download duplicates (B)", dupsB.to_csv(index=False), "dups_B.csv", "text/csv")
+        # No schema comparison or column quality in this tab
+
+
+
+        # st.markdown("### Key Integrity & Duplicates")
+        # stats = key_join_stats(dfA, dfB, key_cols)
+        # c1, c2, c3 = st.columns(3)
+        # c1.metric("Matched keys", stats["matched"])
+        # c2.metric("Only in A", stats["only_in_A"])
+        # c3.metric("Only in B", stats["only_in_B"])
+        # dupA = find_duplicates(dfA, key_cols); dupB = find_duplicates(dfB, key_cols)
+        # if not dupA.empty: st.caption("Duplicate keys in A"); st.dataframe(dupA, use_container_width=True)
+        # if not dupB.empty: st.caption("Duplicate keys in B"); st.dataframe(dupB, use_container_width=True)
+
+
+
+    # Row differences by key is now only shown in the Mismatches tab
+
+    st.markdown("---")
+    st.subheader("Download")
+    # Download logic now only in Mismatches tab
 
